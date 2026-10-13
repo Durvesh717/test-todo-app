@@ -2,6 +2,8 @@ FROM public.ecr.aws/docker/library/python:3.12-slim
 
 WORKDIR /app
 
+ENV DJANGO_SETTINGS_MODULE=todoapp.settings.prod
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
