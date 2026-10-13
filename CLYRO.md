@@ -107,10 +107,12 @@ Notes:
 - `ALLOWED_HOSTS` defaults to `localhost,127.0.0.1` in code. That default is
   **not** safe for production, so `production_default` is `null`. Clyro must
   inject the ALB DNS name plus the task's private IP (or an equivalent).
-- **Not extracted, but required:** `DJANGO_SETTINGS_MODULE`. `manage.py`,
-  `wsgi.py`, `asgi.py` and `celery.py` call `setdefault` to
-  `todoapp.settings.dev`, which none of the access patterns matches. A
-  production deploy should set `DJANGO_SETTINGS_MODULE=todoapp.settings.prod`.
+- **`DJANGO_SETTINGS_MODULE`** is not in the list because the code sets it
+  with `setdefault` to `todoapp.settings.dev`, which none of the access
+  patterns matches. `backend/Dockerfile` now sets
+  `ENV DJANGO_SETTINGS_MODULE=todoapp.settings.prod`, so the web and worker
+  containers start with production settings. The `setdefault` calls leave an
+  explicit value alone.
 - AWS credentials for S3 are not read anywhere in code. boto3 uses the task
   role, which is the intended setup on Clyro.
 
@@ -185,11 +187,19 @@ All 8 applicable checks pass on the post-fix tree. Four failed before
 | `health_endpoint` | no health route; `SECURE_SSL_REDIRECT` would also 301 the ALB probe | `c5b5c55` |
 | `dockerfile_registry` | `FROM python:3.12-slim` (Docker Hub) | `02dbe5f` |
 
+Two more production fixes went in after the compliance gate passed:
+
+| Problem | Fix commit |
+|---|---|
+| No `SECURE_PROXY_SSL_HEADER`, so traffic behind the ALB (TLS terminated there) hit an endless HTTPS redirect | `5d2e923` |
+| The container defaulted to `todoapp.settings.dev` | `6e61641` |
+
 How I verified: `python manage.py check` exits 0 under both
 `todoapp.settings.dev` and `todoapp.settings.prod`.
 `makemigrations --check --dry-run` reports no changes. Under prod settings, a
 Django test client request for `GET /health` with `Host: 10.0.1.23` returned
-200 over plain HTTP.
+200 over plain HTTP. A user request carrying `X-Forwarded-Proto: https`
+returned 200 with no redirect loop.
 
 **Conditional / not-applicable checks:** none. A Dockerfile is committed, so
 `dockerfile_registry` applies. A React frontend was detected, so
@@ -257,16 +267,9 @@ compliance_findings:
 
 ## Recommendations (outside the compliance gate)
 
-- **Set `SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')` in
-  `prod.py`.** The ALB terminates TLS and forwards plain HTTP. Without this
-  setting, `SECURE_SSL_REDIRECT` treats every request as insecure and sends
-  users into a redirect loop. `/health` is exempt, so the loop will not show up
-  in health checks. I left this unchanged because it is not one of the
-  compliance checks.
-- Set `DJANGO_SETTINGS_MODULE=todoapp.settings.prod` on the web and worker
-  services. The code defaults to `dev`.
-- Consider setting `SECURE_HSTS_SECONDS` once HTTPS is confirmed end to end
-  (`security.W004`).
+- Consider setting `SECURE_HSTS_SECONDS` (`security.W004`) once HTTPS works
+  end to end on the final domain. I left it unset on purpose: browsers cache
+  HSTS, so turning it on too early is hard to undo.
 
 ## Metadata
 
@@ -276,7 +279,7 @@ block_reason: null
 block_message: null
 agent: "clyro-scan skill"
 generated_at: "2026-10-13"
-commit_sha: "02dbe5fdf4bf08ee29429bcc6f3e16c3798fac87"
+commit_sha: "6e6164179c65540e25fbc9da59f5aabed1c7010d"
 scan_mode: fix
 confidence: high
 schema_version: 1
