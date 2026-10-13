@@ -74,6 +74,9 @@ STORAGES = {
     'default': {
         'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
     },
+    'staticfiles': {
+        'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+    },
 }
 
 AUTH_PASSWORD_VALIDATORS = [
